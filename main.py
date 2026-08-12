@@ -1,4 +1,6 @@
-import asyncio
+from aiohttp import web # Добавь этот импорт
+
+# ... (import asyncio
 import os
 import random
 import requests
@@ -296,6 +298,29 @@ async def download_handler(cb: types.CallbackQuery):
 # --- ЗАПУСК ---
 async def main():
     print("🚀 Бот успешно запущен!")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())) ...
+
+# 1. Добавь функцию для веб-сервера (нужна для Render)
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+# 2. Обнови функцию main
+async def main():
+    # Настройка веб-сервера для Render
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Порт для Render обычно 10000
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    
+    print(f"🚀 Бот запущен на порту {port}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
