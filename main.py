@@ -16,7 +16,8 @@ warnings.filterwarnings("ignore")
 TOKEN = "8171123432:AAE3oBJMtRBiryyJPrODcvZLqSo3qOLY1Cs"
 ADMIN_ID = 6557367300
 
-IMAGE_URL = "AgACAgIAAxkBAAEtcrjQexLwhpT41qs4qe1hf1gXHI53aWACqh1rG-T02Utgkjd3RSHWOdAEaAwIaA3gAAz0E"
+# Новая сочная GIF-анимация для главного меню (Music Wave / Cyberpunk Vibe)
+IMAGE_URL = "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3Z2azk2Y3R6Zmh0M3EydnA1Zjlpa2dweXljd3YyZjZidnhreHZxOSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7abKba90aA2H4Z2M/giphy.gif"
 
 # --- НАСТРОЙКА GEMINI API ---
 GEMINI_KEY = "AQ.Ab8RN6Lq9dKAY279ar8rVhuQCThmVZGp2L61XRDFUxzyOZqGlQ"
@@ -26,7 +27,10 @@ gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Хелпер для удобного лога в консоль и файл
+# Временное хранилище избранного треков в памяти
+USER_FAVORITES = {}
+
+# Хелпер для логов
 def log_action(user: types.User, action_text: str):
     username = f"@{user.username}" if user.username else "нет_юзернейма"
     info = f"👤 [{user.first_name} | {username} | ID: {user.id}] ➔ {action_text}"
@@ -58,12 +62,18 @@ def search_youtube_tracks(query, max_results=4):
         print(f"Ошибка поиска: {e}")
     return results
 
-# --- 2. СКАЧИВАНИЕ ТРЕКА ПО ID ---
-def download_audio_by_id(video_id):
-    url = f"https://www.youtube.com/watch?v={video_id}"
+# --- 2. СКАЧИВАНИЕ ТРЕКА ПО ID ИЛИ ССЫЛКЕ ---
+def download_audio_by_id(video_id_or_url):
+    if video_id_or_url.startswith("http://") or video_id_or_url.startswith("https://"):
+        url = video_id_or_url
+        out_tmpl = 'song_link_%(id)s.%(ext)s'
+    else:
+        url = f"https://www.youtube.com/watch?v={video_id_or_url}"
+        out_tmpl = f'song_{video_id_or_url}.%(ext)s'
+
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': f'song_{video_id}.%(ext)s',
+        'outtmpl': out_tmpl,
         'quiet': True,
         'nocheckcertificate': True,
         'ignoreerrors': True,
@@ -93,11 +103,18 @@ def recognize_audio_file(file_path):
 # --- 4. КРАСИВОЕ МЕНЮ КНОПОК ---
 def get_main_keyboard():
     keyboard = [
-        [InlineKeyboardButton(text="🔎 Искать песню по названию", callback_data="btn_search_music")],
-        [InlineKeyboardButton(text="📸 Поиск трека по скриншоту", callback_data="btn_screenshot_info")],
-        [InlineKeyboardButton(text="🔥 Топ треков недели", callback_data="btn_top_chart")],
-        [InlineKeyboardButton(text="🎲 Случайный трек", callback_data="btn_random_track")],
-        [InlineKeyboardButton(text="🎙️ Распознать обрывок (Shazam)", callback_data="btn_shazam_info")]
+        [InlineKeyboardButton(text="🔎 Поиск трека", callback_data="btn_search_music"),
+         InlineKeyboardButton(text="📥 Скачать по ссылке", callback_data="btn_download_link")],
+        [InlineKeyboardButton(text="📸 Поиск по фото", callback_data="btn_screenshot_info"),
+         InlineKeyboardButton(text="🎙️ Shazam (Аудио)", callback_data="btn_shazam_info")],
+        [InlineKeyboardButton(text="🔥 Чарт недели", callback_data="btn_top_chart"),
+         InlineKeyboardButton(text="🎲 Рандом трек", callback_data="btn_random_track")],
+        [InlineKeyboardButton(text="🎧 Вайб плейлисты", callback_data="btn_vibe_playlist"),
+         InlineKeyboardButton(text="📜 Текст песни", callback_data="btn_lyrics_info")],
+        [InlineKeyboardButton(text="🎱 Шар судьбы", callback_data="btn_magic_8ball"),
+         InlineKeyboardButton(text="🗿 Мем дня", callback_data="btn_meme_day")],
+        [InlineKeyboardButton(text="☀️ Прогноз погоды", callback_data="btn_weather_info"),
+         InlineKeyboardButton(text="⭐ Моё Избранное", callback_data="btn_favorites")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -108,21 +125,22 @@ async def send_menu(message: types.Message):
     log_action(message.from_user, "🟢 Запустил бота / вызвал /menu")
 
     welcome_text = (
-        f"✨ **Привет, {message.from_user.first_name}!** ✨\n"
-        "━━━━━ • 🤖 • ━━━━━\n"
-        "Я твой личный музыкальный помощник!\n\n"
-        "🎵 **Что я умею:**\n"
-        "├ 🔎 Мгновенный поиск песен по названию\n"
-        "├ 📸 Поиск трека по скриншоту/фото (ИИ Gemini)\n"
-        "├ 🎧 Распознавание голосовых и видео (Shazam)\n"
-        "├ 🔥 Актуальные треки недели\n"
-        "└ 🎲 Случайная музыка под настроение\n\n"
-        "👇 **Выбери действие ниже или просто напиши название песни / скинь скриншот:**"
+        f"🎧 **Welcome to Music Space, {message.from_user.first_name}!** 🎧\n"
+        "⚡️ ═════════════════════ ⚡️\n\n"
+        "🤖 **Твой персональный умный медиа-комбайн!**\n\n"
+        "🔥 **Главные фичи:**\n"
+        " ├ 🎵 **Поиск & Загрузка:** Название, ссылки (YT/VK/Yandex)\n"
+        " ├ 📸 **Умный глаз:** Распознавание трека по скриншоту\n"
+        " ├ 🎙️ **Shazam:** Сканирование голосовых и видео-клипов\n"
+        " ├ 🎧 **Вайб & Чарты:** Подборки под настроение\n"
+        " ├ 📜 **Lyrics AI:** Тексты любых треков\n"
+        " └ 🎱 **Развлечения:** Шар предсказаний, Мемы, Погода\n\n"
+        "👇 *Выбери нужный раздел на панели управления ниже или отправь название/скриншот:* "
     )
 
     try:
-        await message.answer_photo(
-            photo=IMAGE_URL,
+        await message.answer_animation(
+            animation=IMAGE_URL,
             caption=welcome_text,
             reply_markup=get_main_keyboard(),
             parse_mode="Markdown"
@@ -201,7 +219,87 @@ async def broadcast_message(message: types.Message):
 
     await message.answer(f"✅ Успешно отправлено **{count}** пользователям!", parse_mode="Markdown")
 
-# --- 7. РАЗДЕЛ: КНОПКИ МЕНЮ И ЧАРТЫ ---
+# --- 7. РАЗДЕЛ: КНОПКИ МЕНЮ И НОВЫЕ ФИЧИ ---
+
+# 🎱 Шар судьбы
+@dp.callback_query(F.data == "btn_magic_8ball")
+async def cb_magic_8ball(cb: types.CallbackQuery):
+    await cb.answer()
+    log_action(cb.from_user, "🎱 Нажал Шар судьбы")
+    answers = [
+        "Бесспорно! 🎯", "Мне кажется — да. 👍", "Пока не ясно, попробуй снова. 🎲",
+        "Даже не думай. ❌", "Мой ответ — НЕТ. 🛑", "Знаки говорят — ДА! ✨",
+        "Спроси позже, я сейчас на подзарядке. 🔋"
+    ]
+    res = random.choice(answers)
+    await cb.message.answer(f"🎱 **Шар судьбы говорит:**\n\n_{res}_", parse_mode="Markdown")
+
+# 🗿 Мем дня из TikTok
+@dp.callback_query(F.data == "btn_meme_day")
+async def cb_meme_day(cb: types.CallbackQuery):
+    await cb.answer()
+    log_action(cb.from_user, "🗿 Нажал Мем дня")
+    memes = [
+        "https://i.imgflip.com/1bij.jpg",
+        "https://i.imgflip.com/26am.jpg",
+        "https://i.imgflip.com/1tlcq4.jpg",
+        "https://i.imgflip.com/28j0te.jpg"
+    ]
+    await cb.message.answer_photo(
+        photo=random.choice(memes),
+        caption="🗿 **Твой трендовый мем на сегодня!**"
+    )
+
+# ☀️ Погода
+@dp.callback_query(F.data == "btn_weather_info")
+async def cb_weather_info(cb: types.CallbackQuery):
+    await cb.answer()
+    log_action(cb.from_user, "☀️ Нажал кнопку Погода")
+    await cb.message.answer("☀️ Напиши в чат слово `Погода` и название города.\nПример: `Погода Москва` или `Погода Чебоксары`", parse_mode="Markdown")
+
+# 🎧 Плейлист под вайб
+@dp.callback_query(F.data == "btn_vibe_playlist")
+async def cb_vibe_playlist(cb: types.CallbackQuery):
+    await cb.answer()
+    log_action(cb.from_user, "🎧 Нажал Плейлист под вайб")
+    vibes = {
+        "🔥 Дрилл / Фонк": ["DVRST - Close Eyes", "Ghostemane - Fedora", "Shadowraze - Mode Ablaze"],
+        "🎧 Чилл / Лоу-фай": ["Lofi Girl - Study Beats", "Kudasaibeats - The Girl I Haven't Met"],
+        "💪 Тренировка": ["Mick Gordon - BFG 10000", "Prodigy - Voodoo People"]
+    }
+    
+    msg = "🎧 **Подборка треков по вайбам:**\n\n"
+    for vibe, tracks in vibes.items():
+        msg += f"**{vibe}:**\n" + "\n".join([f"• {t}" for t in tracks]) + "\n\n"
+    
+    await cb.message.answer(msg, parse_mode="Markdown")
+
+# 📜 Текст песни
+@dp.callback_query(F.data == "btn_lyrics_info")
+async def cb_lyrics_info(cb: types.CallbackQuery):
+    await cb.answer()
+    log_action(cb.from_user, "📜 Нажал Текст песни")
+    await cb.message.answer("📜 Напиши в чат слово `Текст` и название песни.\nПример: `Текст Miyagi Патрон`", parse_mode="Markdown")
+
+# ⭐ Избранное
+@dp.callback_query(F.data == "btn_favorites")
+async def cb_favorites(cb: types.CallbackQuery):
+    await cb.answer()
+    log_action(cb.from_user, "⭐ Открыл Избранное")
+    user_id = cb.from_user.id
+    favs = USER_FAVORITES.get(user_id, [])
+    if not favs:
+        await cb.message.answer("⭐ У тебя пока нет сохранённых треков.")
+    else:
+        tracks = "\n".join([f"🎵 {t}" for t in favs])
+        await cb.message.answer(f"⭐ **Твоё Избранное:**\n\n{tracks}", parse_mode="Markdown")
+
+# 📥 Скачать по ссылке
+@dp.callback_query(F.data == "btn_download_link")
+async def cb_download_link(cb: types.CallbackQuery):
+    await cb.answer()
+    log_action(cb.from_user, "📥 Нажал Скачать по ссылке")
+    await cb.message.answer("📥 **Отправь ссылку на трек или видео с YouTube / VK прямо в чат!**", parse_mode="Markdown")
 
 @dp.callback_query(F.data == "btn_top_chart")
 async def cb_top_chart(cb: types.CallbackQuery):
@@ -230,7 +328,12 @@ async def cb_random_track(cb: types.CallbackQuery):
     results = await loop.run_in_executor(None, search_youtube_tracks, chosen)
 
     if results:
-        buttons = [[InlineKeyboardButton(text=f"🎵 {t['title']}", callback_data=f"dl_{t['id']}")] for t in results]
+        buttons = []
+        for t in results:
+            buttons.append([
+                InlineKeyboardButton(text=f"🎵 {t['title']}", callback_data=f"dl_{t['id']}"),
+                InlineKeyboardButton(text="⭐", callback_data=f"fav_{t['id']}")
+            ])
         buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="btn_back_to_menu")])
         await status_msg.edit_text(f"🎲 **Случайная подборка ({chosen}):**", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
     else:
@@ -247,7 +350,12 @@ async def cb_search_from_chart(cb: types.CallbackQuery):
     results = await loop.run_in_executor(None, search_youtube_tracks, query)
 
     if results:
-        buttons = [[InlineKeyboardButton(text=f"🎵 {t['title']}", callback_data=f"dl_{t['id']}")] for t in results]
+        buttons = []
+        for t in results:
+            buttons.append([
+                InlineKeyboardButton(text=f"🎵 {t['title']}", callback_data=f"dl_{t['id']}"),
+                InlineKeyboardButton(text="⭐", callback_data=f"fav_{t['id']}")
+            ])
         buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="btn_back_to_menu")])
         await status_msg.edit_text(f"🎯 **Результаты по запросу {query}:**", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
     else:
@@ -258,8 +366,8 @@ async def cb_back_to_menu(cb: types.CallbackQuery):
     await cb.answer()
     log_action(cb.from_user, "↩️ Нажал кнопку: Назад в меню")
     welcome_text = (
-        f"✨ **Привет, {cb.from_user.first_name}!** ✨\n"
-        "━━━━━ • 🤖 • ━━━━━\n"
+        f"🎧 **Welcome to Music Space, {cb.from_user.first_name}!** 🎧\n"
+        "⚡️ ═════════════════════ ⚡️\n\n"
         "👇 **Выбери действие ниже или просто напиши название песни в чат:**"
     )
     await cb.message.edit_caption(caption=welcome_text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
@@ -282,16 +390,79 @@ async def cb_shazam_info(cb: types.CallbackQuery):
     log_action(cb.from_user, "🎙️ Нажал кнопку: Shazam (инструкция)")
     await cb.message.answer("🎙️ **Распознавание:** Скинь в чат голосовое сообщение, кружок или видео!", parse_mode="Markdown")
 
-# --- 8. ПОИСК И СКАЧИВАНИЕ ПО ТЕКСТУ ---
+# Добавление в Избранное по кнопке
+@dp.callback_query(F.data.startswith("fav_"))
+async def cb_add_favorite(cb: types.CallbackQuery):
+    track_id = cb.data.replace("fav_", "")
+    user_id = cb.from_user.id
+    if user_id not in USER_FAVORITES:
+        USER_FAVORITES[user_id] = []
+    
+    track_title = f"Трек ID: {track_id}"
+    if track_title not in USER_FAVORITES[user_id]:
+        USER_FAVORITES[user_id].append(track_title)
+        await cb.answer("⭐ Добавлено в избранное!", show_alert=True)
+    else:
+        await cb.answer("Уже есть в избранном!", show_alert=True)
+
+# --- 8. ПОИСК, ПОГОДА, ТЕКСТЫ И СКАЧИВАНИЕ ПО ТЕКСТУ ---
 @dp.message(F.text & ~F.text.startswith("/"))
 @dp.message(Command("music"))
-async def process_search(message: types.Message):
+async def process_text_input(message: types.Message):
     query = message.text.replace("/music", "").strip() if message.text.startswith("/music") else message.text.strip()
     
     if not query:
         await message.answer("⚠️ Напиши название песни!")
         return
 
+    # Обработка команды Погода
+    if query.lower().startswith("погода"):
+        city = query[6:].strip()
+        if not city:
+            await message.answer("☀️ Укажи город. Пример: `Погода Москва`", parse_mode="Markdown")
+            return
+        try:
+            res = requests.get(f"https://wttr.in/{city}?format=%C+%t+%w").text
+            await message.answer(f"☀️ **Погода в {city}:**\n{res}")
+        except Exception:
+            await message.answer("❌ Не удалось получить данные о погоде.")
+        return
+
+    # Обработка команды Текст песни
+    if query.lower().startswith("текст"):
+        song = query[5:].strip()
+        if not song:
+            await message.answer("📜 Напиши название песни после слова Текст.", parse_mode="Markdown")
+            return
+        
+        status_msg = await message.answer(f"🔍 Ищу текст песни **{song}**...", parse_mode="Markdown")
+        try:
+            prompt = f"Напиши полный текст песни {song}. Если текст слишком длинный, напиши основные куплеты и припев."
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, lambda: gemini_model.generate_content(prompt))
+            await status_msg.edit_text(f"📜 **Текст песни {song}:**\n\n{response.text[:3800]}")
+        except Exception as e:
+            await status_msg.edit_text("❌ Ошибка при поиске текста песни.")
+        return
+
+    # Обработка ссылок (YouTube / VK)
+    if query.startswith("http://") or query.startswith("https://"):
+        log_action(message.from_user, f"📥 Отправил ссылку на скачивание: {query}")
+        status_msg = await message.answer("🚀 Загружаю аудио по вашей ссылке...")
+        try:
+            loop = asyncio.get_event_loop()
+            file_path, title = await loop.run_in_executor(None, download_audio_by_id, query)
+            
+            audio_file = types.FSInputFile(file_path)
+            await message.answer_audio(audio=audio_file, caption=f"🎶 **{title}**", parse_mode="Markdown")
+            await status_msg.delete()
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            await status_msg.edit_text("❌ Ошибка при скачивании по ссылке.")
+        return
+
+    # Обычный поиск песни
     log_action(message.from_user, f"🔎 Ищет песню: '{query}'")
 
     status_msg = await message.answer(f"⚡️ Мгновенный поиск: **{query}**...", parse_mode="Markdown")
@@ -304,7 +475,12 @@ async def process_search(message: types.Message):
         await status_msg.edit_text("❌ Ничего не найдено. Попробуй уточнить запрос.")
         return
 
-    buttons = [[InlineKeyboardButton(text=f"🎵 {track['title']}", callback_data=f"dl_{track['id']}")] for track in results]
+    buttons = []
+    for track in results:
+        buttons.append([
+            InlineKeyboardButton(text=f"🎵 {track['title']}", callback_data=f"dl_{track['id']}"),
+            InlineKeyboardButton(text="⭐", callback_data=f"fav_{track['id']}")
+        ])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     await status_msg.edit_text("🎯 **Найдено несколько вариантов! Выбери нужный:**", reply_markup=kb, parse_mode="Markdown")
 
@@ -372,7 +548,12 @@ async def handle_photo_search(message: types.Message):
         results = await loop.run_in_executor(None, search_youtube_tracks, extracted_text)
 
         if results:
-            buttons = [[InlineKeyboardButton(text=f"🎵 {t['title']}", callback_data=f"dl_{t['id']}")] for t in results]
+            buttons = []
+            for t in results:
+                buttons.append([
+                    InlineKeyboardButton(text=f"🎵 {t['title']}", callback_data=f"dl_{t['id']}"),
+                    InlineKeyboardButton(text="⭐", callback_data=f"fav_{t['id']}")
+                ])
             buttons.append([InlineKeyboardButton(text="⬅️ Назад в меню", callback_data="btn_back_to_menu")])
             await status_msg.edit_text(
                 f"🎶 **Результаты по скриншоту ({extracted_text}):**",
@@ -423,7 +604,12 @@ async def handle_media(message: types.Message):
         
         results = await loop.run_in_executor(None, search_youtube_tracks, track_name)
         if results:
-            buttons = [[InlineKeyboardButton(text=f"🎵 {t['title']}", callback_data=f"dl_{t['id']}")] for t in results]
+            buttons = []
+            for t in results:
+                buttons.append([
+                    InlineKeyboardButton(text=f"🎵 {t['title']}", callback_data=f"dl_{t['id']}"),
+                    InlineKeyboardButton(text="⭐", callback_data=f"fav_{t['id']}")
+                ])
             await status_msg.edit_text(f"🎶 **Распознано:** {track_name}\nВыбери вариант для скачивания:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
         else:
             await status_msg.edit_text("❌ Трек распознан, но не найден для скачивания.")
